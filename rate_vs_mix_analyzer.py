@@ -40,6 +40,22 @@ class GeneralizedMixRateAnalyzer:
         self.volume_col = volume_col
         self.target_col = target_col
         
+        # Determine if target is a percentage metric that should use Revenue for weighting
+        self.is_percentage_metric = (
+            'percent' in target_col.lower() or 
+            'pct' in target_col.lower() or 
+            '%' in target_col.lower() or
+            'margin' in target_col.lower() or
+            'rate' in target_col.lower()
+        )
+        
+        # For percentage metrics, try to find a revenue-like column for consistent weighting
+        self.weighting_col = volume_col  # Default
+        if self.is_percentage_metric:
+            revenue_cols = [col for col in df.columns if 'revenue' in col.lower() or 'sales' in col.lower()]
+            if revenue_cols:
+                self.weighting_col = revenue_cols[0]  # Use first revenue-like column
+                
         self._validate_and_clean_data()
         
         self.periods = sorted(self.df[period_col].unique())
@@ -100,12 +116,14 @@ class GeneralizedMixRateAnalyzer:
         if segments_data.empty:
             return 0
         
-        # Volume-weighted average
-        total_volume = segments_data[self.volume_col].sum()
+        # Use consistent weighting column for percentage metrics
+        weighting_col = self.weighting_col if hasattr(self, 'weighting_col') else self.volume_col
+        
+        total_volume = segments_data[weighting_col].sum()
         if total_volume == 0:
             return 0
         
-        weighted_sum = (segments_data[self.volume_col] * segments_data[self.target_col]).sum()
+        weighted_sum = (segments_data[weighting_col] * segments_data[self.target_col]).sum()
         return weighted_sum / total_volume
     
     def calculate_mix_rate_effects(self) -> Dict:
@@ -414,6 +432,11 @@ def main():
                 analyzer = GeneralizedMixRateAnalyzer(
                     df, period_col, segment_col, volume_col, target_col
                 )
+                
+                # Show weighting info for percentage metrics
+                if hasattr(analyzer, 'is_percentage_metric') and analyzer.is_percentage_metric:
+                    if analyzer.weighting_col != volume_col:
+                        st.info(f"📊 **Note**: For percentage metric '{target_col}', using '{analyzer.weighting_col}' for consistent weighting instead of '{volume_col}'. This ensures the target metric calculation remains stable regardless of volume column selection.")
                 
                 # Store in session state
                 st.session_state['analyzer'] = analyzer
